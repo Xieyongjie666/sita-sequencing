@@ -1,0 +1,1735 @@
+setwd("E:/E-SC20230717001/")
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(magrittr)
+library(gtools)
+library(stringr)
+library(Matrix)
+library(tidyverse)
+library(patchwork)
+library(data.table)
+library(RColorBrewer)
+library(ggpubr)
+
+filenames=list.files( "1.matrix/",full.names = F)
+
+
+
+filenames = filenames[5:8]
+datalist=list()
+for (i in 1:length(filenames)){
+  filename=filenames[i]
+  print(filename)
+  dir.10x = paste0("1.matrix/",filename)
+  filenames_sub=list.files( dir.10x,full.names = F)
+  filenames_sub = paste0("/", filenames_sub)
+  dir.10x = paste0(dir.10x, filenames_sub)
+  print(dir.10x)
+  my.data <- Read10X(data.dir = dir.10x,gene.column = 1) 
+  datalist[[i]]=CreateSeuratObject(counts = my.data, project = filename,min.cells = 3, min.features = 250)
+}
+
+rm(my.data)
+names(datalist)=filenames
+for (i in 1:length(datalist)){
+  sce <- datalist[[i]]
+  sce[["percent.mt"]] <- PercentageFeatureSet(sce, pattern = "^mt-")# 计算线粒体占比
+  # sce[["percent.Ribo"]] <- PercentageFeatureSet(sce, pattern = "^RP[SL]")# 计算rRNA占比
+  datalist[[i]] <- sce
+  rm(sce)
+}
+#合并数据
+sce <- merge(datalist[[1]],y=datalist[2:length(datalist)])
+
+#细胞数统计
+raw_meta=sce@meta.data
+raw_meta$sample = rownames(raw_meta)
+raw_count <- table(raw_meta$sample)
+raw_count
+sum(raw_count)#38582
+raw_meta$nFeature_RNA = ifelse(is.na(raw_meta$nFeature_RNA), 0, raw_meta$nFeature_RNA)
+raw_meta$nCount_RNA = ifelse(is.na(raw_meta$nCount_RNA), 0, raw_meta$nCount_RNA)
+
+pearplot_befor<-VlnPlot(sce,group.by ='orig.ident', 
+                        features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+                        pt.size = 0, 
+                        ncol = 3)
+pearplot_befor
+
+#过滤
+datalist <- lapply(X = datalist, FUN = function(x) {
+  x<-subset(x,subset = nFeature_RNA > 100 & 
+              nFeature_RNA < 5000 & 
+              percent.mt < 10 &
+              nCount_RNA > 100 )
+})
+
+#合并数据
+sce <- merge(datalist[[1]],y=datalist[2:length(datalist)])
+clean_meta=sce@meta.data
+clean_meta$sample = rownames(clean_meta)
+clean_count <- table(clean_meta$sample)
+clean_count
+sum(clean_count)#36600
+pearplot_after <- VlnPlot(sce,
+                          features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+                          pt.size = 0, 
+                          ncol = 3)
+pearplot_after
+# save(sce,file = 'sce.RData')
+
+#降维
+sce <- NormalizeData(sce, normalization.method = "LogNormalize", scale.factor = 10000)
+sce <- FindVariableFeatures(sce, 
+                            selection.method = "vst", 
+                            nfeatures = 2000,
+                            mean.cutoff=c(0.0125,3),
+                            dispersion.cutoff =c(1.5,Inf))
+sce <- ScaleData(sce, features =  rownames(sce))
+sce <- RunPCA(sce, features = VariableFeatures(sce)) 
+DimPlot(sce, reduction = "pca") 
+ElbowPlot(sce, ndims=50, reduction="pca") 
+
+sce <- RunTSNE(sce, 
+               dims=1:30, 
+               reduction="pca",
+               perplexity=30,
+               max_iter=1000)
+pp=DimPlot(sce,
+           reduction="tsne", 
+           label = "F", pt.size = 0.2,
+           label.size = 4) +
+  theme(axis.line = element_blank(), 
+        axis.text = element_blank(), 
+        axis.ticks = element_blank(), 
+        axis.title = element_blank())
+pp
+
+
+Dims <- 30
+#Umap降维
+sce <- RunUMAP(sce, dims=1:Dims, reduction="pca")
+
+pp=DimPlot(sce,
+           reduction="umap", 
+           label = "F", pt.size = 0.2,
+           label.size = 4) +
+  theme(axis.line = element_blank(), 
+        axis.text = element_blank(), 
+        axis.ticks = element_blank(), 
+        axis.title = element_blank())
+pp
+
+
+saveRDS(sce, file = "sita.pbmc.scrna.rds")
+
+pdf("EnrichmentPlot.bar1.pdf",width=15,height=10)
+ EnrichmentPlot(
+  srt = SCRNA.PDAC.epcam, group_by = "group1", group_use = c("Primary tumor","Metastasis lession"),
+    plot_type = "bar"
+  )
+ dev.off()
+
+
+  pdf("EnrichmentPlo.pop1.pdf",width=15,height=10)
+EnrichmentPlot(
+    srt = SCRNA.PDAC.epcam, group_by = "group1", group_use = c("Primary tumor","Metastasis lession"),
+    plot_type = "lollipop"
+   )
+ dev.off()
+ 
+ 
+ 
+ 
+ 
+ #命名
+ #命名改变
+ pbmc.tnbc$celltype <- pbmc.tnbc$seurat_clusters
+ pbmc.tnbc$celltype <- recode(pbmc.tnbc$celltype,
+                              "0" = "Macrophages",
+                              "1" = "Macrophages",
+                              "2" = "Monocytes",
+                              "3" = "Cancer cell_C1",
+                              "4" = "Cancer cell_C2",
+                              "5" = "Macrophages",
+                              "6" = "Macrophages",
+                              "7" = "Cancer cell_C3",
+                              "8" = "Lymphocytes",
+                              "9" = "CAF_C1",
+                              "10" = "CAF_C2",
+                              "11" = "Neutrophills",
+                              "12" = "CAF_C3"
+ )                                 
+ 
+ #命名改变
+ pbmc.tnbc$cell.cluster <- pbmc.tnbc$seurat_clusters
+ pbmc.tnbc$cell.cluster <- recode(pbmc.tnbc$cell.cluster,
+                                  "0" = "Monocytes and macrophages",
+                                  "1" = "Monocytes and macrophages",
+                                  "2" = "Monocytes and macrophages",
+                                  "3" = "Cancer cell",
+                                  "4" = "Cancer cell",
+                                  "5" = "Monocytes and macrophages",
+                                  "6" = "Monocytes and macrophages",
+                                  "7" = "Cancer cell",
+                                  "8" = "Lymphocytes",
+                                  "9" = "Cancer associated fibroblast",
+                                  "10" = "Cancer associated fibroblast",
+                                  "11" = "Neutrophills",
+                                  "12" = "Cancer associated fibroblast")
+ 
+ scRNA.anti40$cell.type <- scRNA.anti40$cell_state_annotation
+ pbmc.tnbc$cell.type <- recode(pbmc.tnbc$cell.type,
+                               "0" = "Monocytes and macrophages",
+                               "1" = "Monocytes and macrophages",
+                               "2" = "Monocytes and macrophages",
+                               "3" = "Cancer cell_Atm_high",
+                               "4" = "Cancer cell_Atm_low",
+                               "5" = "Monocytes and macrophages",
+                               "6" = "Monocytes and macrophages",
+                               "7" = "Cancer cell_Atm_low",
+                               "8" = "Lymphocytes",
+                               "9" = "Cancer associated fibroblast",
+                               "10" = "Cancer associated fibroblast",
+                               "11" = "Neutrophills",
+                               "12" = "Cancer associated fibroblast")
+ 
+
+ #使用Featureplot标记基因
+ pdf("zhaoyupei.EIF2A佘姐姐相关性.pdf",width=15,height=5)
+ FeaturePlot(zhaoyupei, features = c("KRT19", "KRT7"),
+             cols = c("green", "blue", "red"),
+             blend=T,blend.threshold=0)
+ 
+dev.off()
+ 
+cols = c("green", "blue", "red"),
+Ductal.cells.zhaoyupei<-subset(zhaoyupei,idents=c("Ductal cell type 2"))
+a<-subset(scrna.pdac16,idents=c("8")) 
+ 
+ saveRDS(zhaoyupei,"zhaoyupei")
+ 
+ 
+ 
+ zhaoyupei@active.ident<-zhaoyupei$cluster
+ #人源
+ pdf("zhaoyupei21.补实验.pdf",width=12,height=8)
+ CellDimPlot(
+   srt = zhaoyupei21, group.by = c("orig.ident","cluster"),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ #鼠源
+ pdf("kpc.FIBRO.SCRNAseq.补实验.pdf",width=8,height=5)
+ CellDimPlot(
+    srt = kpc.FIBRO.SCRNAseq, group.by = c("cell.type"),
+    reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ 
+ #
+ pdf("cellpopulation.all_cells_obj.1.pdf",width=20,height=10)
+ CellDimPlot(
+   srt = all_cells_obj.1, group.by = c("orig.ident","cell.type","CellType"),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ #
+ pdf("cellpopulation1.Ductal.cells.zhaoyupei.pdf",width=20,height=10)
+ CellDimPlot(
+   srt = Ductal.cells.zhaoyupei, group.by = c("orig.ident","RNA_snn_res.0.8","cell.type"),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ #
+ pdf("cellpopulation1.PDAC.SCRNA.TISSUE.PBMC.combined1.pdf",width=15,height=15)
+ CellDimPlot(
+   srt = PDAC.SCRNA.TISSUE.PBMC.combined1,group.by = c("cell.type"),
+   reduction = "tsne", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ 
+ #
+ pdf("CellDimPlot.phase.pdf",width=10,height=10)
+ CellDimPlot(
+   srt = Neoadjtherapy.tumor, group.by = "cell_type_main_ESCCALL", stat.by = "Phase",
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ #人源
+ pdf("FeatureDimPlot.zhaoyupei21.补实验.pdf",width=12,height=8)
+ FeatureDimPlot(
+   srt =zhaoyupei21, features = c("EPCAM", "KRT19", "FXYD3", "MUC1","COL1A1","ACTA2","KRT8","CXCL1"),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+kpc.FIBRO.SCRNAseq=`kpc-FIBRO-SCRNAseq (2)`
+
+#
+#鼠源
+pdf("FeatureDimPlot.kpc.FIBRO.SCRNAseq.补实验.pdf",width=12,height=8)
+FeatureDimPlot(
+   srt =kpc.FIBRO.SCRNAseq, features = c("Epcam", "Krt19", "Fxyd3", "Muc1","Col1a1","Acta2","Cxcl1"),
+   reduction = "UMAP", theme_use = "theme_blank"
+)
+dev.off()
+
+kpc.FIBRO.SCRNAseq=`kpc-FIBRO-SCRNAseq (2)`
+
+
+
+
+ #
+ pdf("FeatureDimPlot.Ductal.cells.zhaoyupei.LWS.EMT.SCORE.pdf",width=10,height=8)
+ FeatureDimPlot(
+    srt =Ductal.cells.zhaoyupei, features = c(
+       "EPCAM", "SNAI2", "CDH2", "CDH1", "SOX2","SNAI1","VIM", "ZEB1", "FN1", "CLDN1", "MMP9","SIX1" # Beta, Alpha, Delta, Epsilon
+    ),
+    reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ 
+ pdf("FeatureDimPlot.intergrated1.newpublish0326.pdf",width=6,height=8)
+ FeatureDimPlot(
+   srt =intergrated1.newpublish0326, features = c(
+     "KRT19","EPCAM","MUC1",  "FXYD3"# Beta, Alpha, Delta, Epsilon
+   ),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ c("EPCAM", "KRT19", "FXYD3", "MUC1","HNF1A","HNF4G","GATA4","GATA6","ONECUT2","CLDN18")
+ 
+ pdf("FeatureDimPlot.PDAC.SCRNA.TPBMC.combined1.genes.pdf",width=15,height=15)
+ FeatureDimPlot(
+   srt =PDAC.SCRNA.TISSUE.PBMC.combined1, features = c("EPCAM", "KRT19", "FXYD3", "HLA-B","ANKRD22","B2M","HLA-A","HLA-C","HLA-E","CLDN18"),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ pdf("FeatureDimPlot.PDAC.SCRNA.TISSUE.PBMC.combined.gene3.pdf",width=15,height=15)
+ FeatureDimPlot(
+   srt =PDAC.SCRNA.TISSUE.PBMC.combined, features = c(
+     "PRSS1","CHGB","RGS5",  "MS4A1", "CD1C", "FLT3","CD33","MMP8", "NOS2", "ARG1" # Beta, Alpha, Delta, Epsilon
+   ),
+   reduction = "TSNE", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ 
+ #
+ pdf("FeatureDimPlot.SCRNA.PDAC.cluster.TM4SF20.pdf",width=12,height=12)
+ FeatureDimPlot(
+   srt = SCRNA.PDAC.cluster, features = c(
+     "EPCAM","CLDN3","FXYD3"
+   ),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ #
+ pdf("FeatureDimPlot. pbmc.tnbc.gene.pdf",width=10,height=10)
+ FeatureDimPlot(
+   srt =  pbmc.tnbc, features =c(
+     "Krt19","Epcam","Cd3d",  "S100a8", "S100a9", "Cd79a","Cd14","Apoe", "Csf3r", "Nkg7","Cd68", "Cldn5", "Acta2","Col1a1" # Beta, Alpha, Delta, Epsilon
+   ),
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ 
+ 
+ pdf("pbmc.tnbc.DIM.plot.pdf",width=10,height=10)
+ FeatureDimPlot(
+   srt = pbmc.tnbc, features = c(
+     "Krt19","Epcam","Cd3d",  "S100a8", "S100a9", "Cd79a","Cd14","Apoe", "Csf3r", "Nkg7","Cd68", "Cldn5", "Acta2","Col1a1" # Beta, Alpha, Delta, Epsilon
+   ),
+   compare_features = TRUE, label = TRUE, label_insitu = TRUE,
+   reduction = "UMAP", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ pdf("GroupHeatmap.zhaoyupei.LWS.气泡图注释.pdf",width=20,height=6)
+ ht <- GroupHeatmap(
+   srt = zhaoyupei,
+   features = c(
+     "EPCAM", "KRT19", "FXYD3", "MUC1", "FOXP3","CD8A","CD3D",  "S100A8", "S100A9", "CD79A","CD14","APOE", "CSF3R", "NKG7","CD68", "CLDN5", "ACTA2","COL1A1" # Beta, Alpha, Delta, Epsilon
+   ),
+   group.by = c("orig.ident", "cluster"),
+   heatmap_palette = "YlOrRd",
+   cell_annotation = c("CD3D", "S100A8", "EPCAM","COL1A1"),
+   cell_annotation_palette = c("Dark2", "Paired", "Paired"),
+   show_row_names = TRUE, row_names_side = "left",
+   add_dot = TRUE, add_reticle = TRUE
+ )
+ print(ht$plot)
+ dev.off()
+ 
+ #CellQC
+ pancreas_sub <- RunCellQC(srt = pancreas_sub)
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellDimPlot(srt = pancreas_sub, group.by = "CellQC", reduction = "UMAP")
+ dev.off()
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellStatPlot(srt = pancreas_sub, stat.by = "CellQC", group.by = "cell.type", label = TRUE)
+ dev.off()
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellStatPlot(
+   srt = pancreas_sub,
+   stat.by = c(
+     "db_qc", "outlier_qc", "umi_qc", "gene_qc",
+     "mito_qc", "ribo_qc", "ribo_mito_ratio_qc", "species_qc"
+   ),
+   plot_type = "upset", stat_level = "Fail"
+ )
+ dev.off()
+ 
+ #Standard pipeline
+ pancreas_sub <- Standard_SCP(srt = pancreas_sub)
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellDimPlot(
+   srt = pancreas_sub, group.by = c("cell.type", "Subcell.type"),
+   reduction = "StandardUMAP2D", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellDimPlot3D(srt = pancreas_sub, group.by = "Subcell.type")
+ dev.off()
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ FeatureDimPlot3D(srt = pancreas_sub, features = c("Sox9", "Neurog3", "Fev", "Rbp4"))
+ dev.off()
+ 
+ #Integration pipeline
+ #Example data for integration is a subsetted version of panc8(eight human pancreas datasets)
+ 
+ data("panc8_sub")
+ panc8_sub <- Integration_SCP(srtMerge = panc8_sub, batch = "tech", integration_method = "Seurat")
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellDimPlot(
+   srt = panc8_sub, group.by = c("cell.type", "tech"), reduction = "SeuratUMAP2D",
+   title = "Seurat", theme_use = "theme_blank"
+ )
+ dev.off()
+ 
+ #UMAP embeddings based on different integration methods in SCP:
+ 
+ #Integration-all
+ 
+ #Cell projection between single-cell datasets
+ NKcell_rename <- RenameFeatures(srt = NKcell, newnames = make.unique(capitalize(rownames(panc8_sub), force_tolower = TRUE)), assays = "RNA")
+ srt_query <- RunKNNMap(srt_query = pancreas_sub, srt_ref = panc8_rename, ref_umap = "SeuratUMAP2D")
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ ProjectionPlot(
+   srt_query = srt_query, srt_ref = panc8_rename,
+   query_group = "Subcell.type", ref_group = "cell.type"
+ )
+ dev.off()
+ 
+ #Cell annotation using bulk RNA-seq datasets
+ data("ref_scMCA")
+ pancreas_sub <- RunKNNPredict(srt_query = pancreas_sub, bulk_ref = ref_scMCA, filter_lowfreq = 20)
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellDimPlot(srt = pancreas_sub, group.by = "KNNPredict_classification", reduction = "UMAP", label = TRUE)
+ dev.off()
+ 
+ #Cell annotation using single-cell datasets
+ pancreas_sub <- RunKNNPredict(
+   srt_query = pancreas_sub, srt_ref = panc8_rename,
+   ref_group = "cell.type", filter_lowfreq = 20
+ )
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellDimPlot(srt = pancreas_sub, group.by = "KNNPredict_classification", reduction = "UMAP", label = TRUE)
+ dev.off()
+ 
+ pancreas_sub <- RunKNNPredict(
+   srt_query = pancreas_sub, srt_ref = panc8_rename,
+   query_group = "Subcell.type", ref_group = "cell.type",
+   return_full_distance_matrix = TRUE
+ )
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ CellDimPlot(srt = pancreas_sub, group.by = "KNNPredict_classification", reduction = "UMAP", label = TRUE)
+ dev.off()
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ ht <- CellCorHeatmap(
+   srt_query = pancreas_sub, srt_ref = panc8_rename,
+   query_group = "Subcell.type", ref_group = "cell.type",
+   nlabel = 3, label_by = "row",
+   show_row_names = TRUE, show_column_names = TRUE
+ )
+ print(ht$plot)
+ dev.off()
+ 
+ #PAGA analysis
+ pancreas_sub <- RunPAGA(
+   srt = pancreas_sub, group_by = "Subcell.type",
+   linear_reduction = "PCA", nonlinear_reduction = "UMAP"
+ )
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ PAGAPlot(srt = pancreas_sub, reduction = "UMAP", label = TRUE, label_insitu = TRUE, label_repel = TRUE)
+ dev.off()
+ 
+ 
+ #Velocity analysis
+ pancreas_sub <- RunSCVELO(
+   srt = pancreas_sub, group_by = "Subcell.type",
+   linear_reduction = "PCA", nonlinear_reduction = "UMAP"
+ )
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ VelocityPlot(srt = pancreas_sub, reduction = "UMAP", group_by = "Subcell.type")
+ dev.off()
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ VelocityPlot(srt = pancreas_sub, reduction = "UMAP", plot_type = "stream")
+ dev.off()
+ 
+ #Differential expression analysis
+ scRNA.brca.zk <- RunDEtest(srt = scRNA.brca.zk, group_by = "cell.type",  fc.threshold = 1, only.pos = FALSE)
+ pdf("差异基因展示.VOLCANO.plot.pdf",width=12,height=8)
+ VolcanoPlot(srt = Ductal.cells.zhaoyupei, group_by = "cell.type")
+ dev.off()
+ 
+ DEGs <- scRNA.brca.zk@tools$DEtest_cell.type$AllMarkers_wilcox
+ DEGs <- DEGs[with(DEGs, avg_log2FC > 1 & p_val_adj < 0.05), ]
+ # Annotate features with transcription factors and surface proteins
+ scRNA.brca.zk <- AnnotateFeatures(scRNA.brca.zk, species = "Homo_sapiens", db = c("TF", "SP"))
+ pdf("feature.Ductal.cells.zhaoyupei.Heatmap.plot1.pdf",width=34,height=12)
+ ht <- FeatureHeatmap(
+   srt = scRNA.brca.zk, group.by = "cell.type", features = DEGs$gene, feature_split = DEGs$group1,
+   species = "Homo_sapiens", db = c("GO_BP", "KEGG", "WikiPathway"), anno_terms = TRUE,
+   feature_annotation = c("TF", "SP"), feature_annotation_palcolor = list(c("gold", "steelblue"), c("forestgreen")),
+   height = 6, width =15
+ )
+ print(ht$plot)
+ dev.off()
+ 
+ #Enrichment analysis(over-representation)
+ scRNA.brca.zk <- RunEnrichment(
+   srt = scRNA.brca.zk, group_by = "cell.type", db = "GO_BP", species = "Homo_sapiens",
+   DE_threshold = "avg_log2FC > 0.5 & p_val_adj < 0.1"
+ )
+ 
+ pdf("EnrichmentPlot.Ductal.cells.zhaoyupei.pdf",width=15,height=10)
+ EnrichmentPlot(
+   srt = Ductal.cells.zhaoyupei, group_by = "cell.type", group_use = c("High_score_EMT_signature", "Low_score_EMT_signature"),
+   plot_type = "lollipop"
+ )
+ dev.off()
+ 
+
+ 
+ pdf("EnrichmentPlot.wordcloud.pdf",width=10,height=10)
+ EnrichmentPlot(
+   srt = NKcell, group_by = "cell.type", group_use = c("FGFBP2+NK", "Tissue resident NK_C2"),
+   plot_type = "wordcloud"
+ )
+ dev.off()
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ EnrichmentPlot(
+   srt = pancreas_sub, group_by = "cell.type", group_use = c("Ductal", "Endocrine"),
+   plot_type = "wordcloud", word_type = "feature"
+ )
+ dev.off()
+ 
+ pdf("EnrichmentPlot.comparison.pdf",width=10,height=10)
+ EnrichmentPlot(srt = NKcell, group_by = "cell.type", plot_type = "comparison")
+ dev.off()
+ 
+ #Enrichment analysis(GSEA)
+ Ductal.cells.zhaoyupei <- RunGSEA(
+   srt = Ductal.cells.zhaoyupei, group_by = "cell.type", db = "GO_BP", species = "Homo_sapiens",
+   DE_threshold = "p_val_adj < 0.05"
+ )
+ 
+ pdf("GSEAPlot.L.Ductal.cells.zhaoyupei.pdf",width=10,height=10)
+ GSEAPlot(srt = Ductal.cells.zhaoyupei, group_by = "cell.type", group_use = "High_score_EMT_signature", geneSetID = "GO:0019886")
+ dev.off()
+ 
+ pdf("GSEAPlot.NK.pdf",width=10,height=10)
+ GSEAPlot(srt = NKcell, group_by = "cell.type", plot_type = "comparison")
+ dev.off()
+ 
+ #Trajectory inference
+ scRNA.brca.zk <- RunSlingshot(srt = scRNA.brca.zk, group.by = "cell.type", reduction = "tsne")
+
+ 
+ pdf("FeatureDimPlot.slingshot.plot1.pdf",width=8,height=8)
+ FeatureDimPlot(scRNA.brca.zk, features = paste0("Lineage", 1:4), reduction = "UMAP", theme_use = "theme_blank")
+ dev.off()
+ 
+ pdf("CellDimPlot.slingshot.plot2.pdf",width=8,height=8)
+ CellDimPlot(scRNA.brca.zk, group.by = "cell.type", reduction = "UMAP", lineages = c("Lineage1", "Lineage3","Lineage4"), lineages_span = 0.1)
+ dev.off()
+ 
+ pdf("CellDimPlot.slingshot.plot1.pdf",width=8,height=8)
+ CellDimPlot(scRNA.brca.zk, group.by = "cell.type", reduction = "UMAP", lineages = paste0("Lineage", 1:4), lineages_span = 0.1)
+ dev.off()
+ 
+ #Dynamic features
+ scRNA.brca.zk <- RunDynamicFeatures(srt = scRNA.brca.zk, lineages = c("Lineage1", "Lineage2","Lineage3","Lineage4"), n_candidates = 200)
+ 
+ pdf("DynamicHeatmap.Ductal.cells.zhaoyupei.plot1.pdf",width=16,height=8)
+ ht1 <- DynamicHeatmap(
+   srt = Ductal.cells.zhaoyupei,
+   lineages = c("Lineage1", "Lineage2","Lineage3","Lineage4"),
+   n_split = 5,min_expcells = 2,
+   r.sq = 0.05,
+   dev.expl = 0.2,
+   padjust = 0.45,split_method
+   = c("kmeans"),species = "Homo_sapiens", db = "GO_BP", anno_terms = TRUE, anno_keys = TRUE, anno_features = TRUE,
+   heatmap_palette = "viridis", feature_annotation_palcolor = list(c("gold", "steelblue"), c("forestgreen")),
+   pseudotime_label = 25, pseudotime_label_color = "red",separate_annotation = list("cell.type", c("CDH2", "FN1","ZEB1","VIM","SNAI1","SNAI2")), separate_annotation_palette = c("Paired", "Set1"),
+   height = 5, width =4,
+   cell_annotation = "cell.type"
+ )
+ print(ht1$plot)
+ dev.off()
+ 
+ 
+ pdf("DIM.DynamicPlot.NKCELL.plot1.pdf",width=18,height=10)
+ DynamicPlot(
+   srt = NKcell, lineages = c("Lineage1", "Lineage2","Lineage3","Lineage4"), group.by = "cell.type",
+   features = c("PTGDS", "FGFBP2","CCL4L2","NKG7","CD52","FCGR3B"),
+   compare_lineages = TRUE, compare_features = FALSE
+ )
+ dev.off()
+ 
+ 
+ pdf("DIM.DynamicPlot.NKCELL.plot1.pdf",width=18,height=10)
+ DynamicPlot(
+    srt = NKcell, lineages = c("Lineage1", "Lineage2","Lineage3","Lineage4"), group.by = "cell.type",
+    features = c("PTGDS", "FGFBP2","CCL4L2","NKG7","CD52","FCGR3B"),
+    compare_lineages = TRUE, compare_features = FALSE
+ )
+ dev.off()
+ 
+ 
+ 
+ pdf("DIM.VOLCANOplot.pdf",width=10,height=10)
+ FeatureStatPlot(
+   srt = pancreas_sub, group.by = "Subcell.type", bg.by = "cell.type",
+   stat.by = c("Sox9", "Neurod2", "Isl1", "Rbp4"), add_box = TRUE,
+   comparisons = list(
+     c("Ductal", "Ngn3 low EP"),
+     c("Ngn3 high EP", "Pre-endocrine"),
+     c("Alpha", "Beta")
+   )
+ )
+ dev.off()
+ 
+ Interactive data visualization with SCExplorer
+ PrepareSCExplorer(list(mouse_pancreas = pancreas_sub, human_pancreas = panc8_sub), base_dir = "./SCExplorer")
+ app <- RunSCExplorer(base_dir = "./SCExplorer")
+ list.files("./SCExplorer") # This directory can be used as site directory for Shiny Server.
+ 
+ if (interactive()) {
+   shiny::runApp(app)
+ }
+ SCExplorer1 SCExplorer2
+ 
+ Other visualization examples
+ CellDimPlotExample1 CellStatPlotExample2 FeatureStatPlotExample3 GroupHeatmapExample3
+ 
+ You can also find more examples in the documentation of the function: Integration_SCP, RunKNNMap, RunMonocle3, RunPalantir, etc.
+ 
+ 
+ 
+ 
+ 
+ features = c(
+   "KRT19","EPCAM","CD3D",  "S100a8", "S100A9", "CD79A","CD14","APOE", "CSF3R", "NKG7","CD68", "CLDN5", "ACTA2","COL1A1" # Beta, Alpha, Delta, Epsilon
+ )
+
+####配色####
+library(RColorBrewer)
+display.brewer.all() #查看颜色配色方案
+brewer.pal(11, "Dark2") #取出自己喜欢的配色板配色
+display.brewer.all(n=5,type="div",exact.n=TRUE)
+# "#7570B3" "#666666" "#D95F02"
+####1 GEO数据集差异分析####
+load('1.geo_diff//GSE26566_exp.Rdata')
+load('1.geo_diff//GSE32225_exp.Rdata')
+l <- list(rownames(GSE26566_exp2),rownames(GSE32225_exp2))
+
+gene <- Reduce(intersect,l)
+
+new.GSE26566 <- GSE26566_exp2[gene,]
+new.GSE32225 <- GSE32225_exp2[gene,]
+
+new.GSE26566[is.na(new.GSE26566)] <- 0
+new.GSE32225[is.na(new.GSE32225)] <- 0
+
+comb <- cbind.data.frame(new.GSE26566,new.GSE32225)
+group <- rep(c('tumor','normal','tumor','normal'),c(104,6,149,6))
+library(sva)
+
+exp=as.matrix(comb)
+dimnames=list(rownames(exp),colnames(exp))
+data=matrix(as.numeric(as.matrix(exp)),nrow=nrow(exp),dimnames=dimnames)
+dim(data)
+batchType=c(rep(1,110),rep(2,155))
+modType=group
+mod = model.matrix(~as.factor(modType))
+outTab=data.frame(ComBat(data, batchType, mod, par.prior=TRUE))
+
+# write.table(outTab,file="normalize.txt",sep="\t",quote=F,col.names=F)
+# save(outTab,file="normalize.Rdata")
+
+names(outTab[group=='tumor'])  
+names(outTab[group=='normal'])  
+
+outTab2 <- cbind.data.frame(outTab[group=='normal'],outTab[group=='tumor'])
+
+save(outTab2,file="1.geo_diff//normalize.Rdata")
+####normal 12, tumor 253
+dim(outTab2)
+tumor_exp <- outTab2
+
+table(group)
+library(limma)
+#differential差异分析
+##构建分组矩阵
+class <- factor(c(rep("normal",12),rep("tumor",253)))
+contrast <- paste0(rev(levels(class)), collapse = "-")
+contrast
+table(group)
+# 制作分组矩阵
+design <- model.matrix( ~ 0 + class)
+colnames(design) <- levels(class)
+# 制作差异表达矩阵
+contrast.matrix <- makeContrasts(contrast, levels = design)
+contrast.matrix
+# 使用limma进行差异分析
+expr <- outTab2
+fit <- lmFit(expr, design)
+fit <- contrasts.fit(fit, contrast.matrix)
+fit <- eBayes(fit)
+#输出基因
+all_Res <- topTable(fit, coef = 1, n = Inf) #选择20万是为了输出所有基因
+head(all_Res)
+save(all_Res,file = "1.geo_diff//all_Res.Rda")
+#写入表格
+write.table(all_Res,file="1.geo_diff//all_Res.txt",sep="\t",quote=F)
+
+#找出logFC > 1，adj.P.Val < 0.05，写入表格
+diff_Res <- subset(all_Res,(logFC> 1 | logFC< (-1)) & adj.P.Val < 0.05) 
+write.table(diff_Res,file="1.geo_diff//diff_Res.xls",sep="\t",quote=F)
+dim(diff_Res)
+head(diff_Res)
+rownames(diff_Res)
+#热图
+hmexp <- outTab2[rownames(diff_Res),]
+hmexp_1 <- scale( hmexp )
+hmexp_2 <- as.matrix(hmexp)
+library(gplots)
+A <- brewer.pal(11,"PiYG")
+morecol <- colorRampPalette(A)
+pdf("1.geo_diff//heatmap.pdf")
+heatmap.2(hmexp_1,,dendrogram = "column",
+#          scale = "row",
+          trace = "none",
+          col = rev(morecol(150)),
+          colsep = 4,
+          rowsep = 42,
+          labRow = NA,
+          density.info = "none",
+          key.xlab = "Z Score",
+          key.title = NA,
+          key.ylab = NA)
+dev.off()
+
+##volcano##
+selectedGeneID <- read.csv("1.geo_diff//selected_gene.csv")
+head(selectedGeneID)
+x <- all_Res
+x$label<- rownames(x)
+head(x)
+
+x$gsym <- row.names(x)
+selectgenes <- merge(selectedGeneID, x, by = "gsym")
+head(selectgenes)
+plot_mode <- "advanced" 
+
+logFCcut <- 1 #log2-foldchange
+pvalCut <- 0.05 #P.value
+adjPcut <- 0.05 #adj.P.value
+
+#for advanced mode
+logFCcut2 <- 3
+logFCcut3 <- 5
+pvalCut2 <- 0.01
+pvalCut3 <- 0.001
+
+xmin <- (range(x$logFC)[1]- (range(x$logFC)[1]+ 10))
+xmax <- (range(x$logFC)[1]+ (10-range(x$logFC)[1]))
+ymin <- 0
+ymax <- -log10(x$adj.P.Val)[3] * 1.1
+
+mycol <- c("#7570B3","#666666","#D95F02","#223D6C","#D20A13","#088247","#58CDD9","#7A142C","#5D90BA","#431A3D","#91612D","#6E568C","#E0367A","#D8D155","#64495D","#7CC767")
+#火山图
+if (plot_mode == "classic"){
+  x$color_transparent <- ifelse((x$adj.P.Val < pvalCut & x$logFC > logFCcut), "red", 
+                                ifelse((x$adj.P.Val < pvalCut & x$logFC < -logFCcut), 
+                                       "#9E0142", "#5E4FA2"))
+  size <- ifelse((x$adj.P.Val < pvalCut & abs(x$logFC) > logFCcut), 4, 2)
+  
+} else if (plot_mode == "advanced") {
+  
+  n1 <- length(x[, 1])
+  cols <- rep("grey30", n1)
+  names(cols)<- rownames(x)
+  
+  cols[x$adj.P.Val < pvalCut & x$logFC >logFCcut]<- "#D95F02"
+  cols[x$adj.P.Val < pvalCut2 & x$logFC > logFCcut2]<- "#D95F02"
+  cols[x$adj.P.Val < pvalCut & x$logFC < -logFCcut]<- "#7570B3"
+  cols[x$adj.P.Val < pvalCut2 & x$logFC < -logFCcut2]<- "#7570B3"
+  color_transparent <- adjustcolor(cols, alpha.f = 0.5)
+  x$color_transparent <- color_transparent
+  
+  n1 <- length(x[, 1])
+  size <- rep(1, n1)
+  
+  size[x$adj.P.Val < pvalCut & x$logFC > logFCcut]<- 4
+  size[x$adj.P.Val < pvalCut2 & x$logFC > logFCcut2]<- 6
+  size[x$adj.P.Val < pvalCut3 & x$logFC > logFCcut3]<- 8
+  size[x$adj.P.Val < pvalCut & x$logFC < -logFCcut]<- 4
+  size[x$adj.P.Val < pvalCut2 & x$logFC < -logFCcut2]<- 6
+  size[x$adj.P.Val < pvalCut3 & x$logFC < -logFCcut3]<- 8
+  
+} else {
+  stop("Unsupport mode")
+}
+library(ggplot2)
+library(ggrepel)
+library(ggthemes)
+
+# Construct the plot object
+p1 <- ggplot(data=x, aes(logFC, -log10(adj.P.Val), label = label, color = pathway)) +
+  geom_point(alpha = 0.6, size = size, colour = x$color_transparent) +
+  
+  labs(x=bquote(~Log[2]~"(fold change)"), y=bquote(~-Log[10]~italic("adj.P.Value")), title="") + 
+  ylim(c(ymin,ymax)) +
+  scale_x_continuous(
+    breaks = c(-5, -3, -logFCcut, 0, logFCcut, 3, 5), #刻度线的位置
+    labels = c(-5, -3, -logFCcut, 0, logFCcut, 3, 5),
+    limits = c(-6, 6) #x轴范围，两侧对称才好看
+  ) + 
+  
+  #画阈值分界线
+  geom_vline(xintercept = c(-logFCcut, logFCcut), color="grey40", 
+             linetype="longdash", lwd = 0.5) + #虚线的形状和粗细
+  geom_hline(yintercept = -log10(pvalCut), color="#666666", 
+             linetype="longdash", lwd = 0.5) +
+  
+  theme_bw(base_size = 12
+  ) +
+  theme(panel.grid=element_blank())
+
+if (plot_mode == "advanced") {
+  p1 <- p1 + 
+    geom_vline(xintercept = c(-1, 1), color="grey40", 
+               linetype="longdash", lwd = 0.5) +
+    geom_hline(yintercept = -log10(0.05), color="#666666", 
+               linetype="longdash", lwd = 0.5)
+}
+p1
+# 突出显示候选基因
+p2 <- p1 + 
+  geom_point(data = selectgenes, alpha = 1, size = 4, shape = 21, 
+             stroke = 1, 
+             fill = "navy") +
+  scale_color_manual(values = mycol) + 
+  geom_text_repel(data = selectgenes, color = "navy",
+                  show.legend = FALSE, #不显示图例
+                  size = 5, box.padding = unit(0.35, "lines"), 
+                  point.padding = unit(0.3, "lines")) +
+  guides(color=guide_legend(title = NULL)) 
+p2
+if (plot_mode == "advanced"){ggsave("1.geo_diff//all_volcano.pdf", width=6,height=5)}
+####基因差异分析####
+rm(list = ls())
+library(tidyverse)
+load("1.geo_diff//normalize.Rdata")
+head(outTab2)
+Tumor_exp <- outTab2[,13:265]
+dim(Tumor_exp)
+save(Tumor_exp,file = "2.gene_diff//Tumor_exp.Rdata")
+gene_exp <- Tumor_exp["ELF3",]
+gene_data <- as.numeric(gene_exp["ELF3",])
+median(gene_data)
+group <- ifelse(Tumor_exp["ELF3",] < median(gene_data), 
+                "Low", "High")
+table(group)
+
+library(limma)
+#differential差异分析
+##构建分组矩阵
+class <- factor(group, levels = c("Low","High"))
+contrast <- paste0(rev(levels(class)), collapse = "-")
+contrast
+# 制作分组矩阵
+design <- model.matrix( ~ 0 + class)
+colnames(design) <- levels(class)
+# 制作差异表达矩阵
+contrast.matrix <- makeContrasts(contrast, levels = design)
+contrast.matrix
+# 使用limma进行差异分析
+expr <- Tumor_exp
+fit <- lmFit(expr, design)
+fit <- contrasts.fit(fit, contrast.matrix)
+fit <- eBayes(fit)
+#输出基因
+all_Res <- topTable(fit, coef = 1, n = Inf) #选择20万是为了输出所有基因
+head(all_Res)
+dim(all_Res)
+save(all_Res,file = "2.gene_diff//all_Res.Rda")
+#写入表格
+write.table(all_Res,file="2.gene_diff//all_Res.txt",sep="\t",quote=F)
+#找出logFC > 1，adj.P.Val < 0.05，写入表格
+diff_Res <- subset(all_Res,(logFC> 1 | logFC< (-1)) & adj.P.Val < 0.05) %>%
+  arrange(desc(logFC)) 
+head(diff_Res)
+dim(diff_Res)
+diff_Res <- diff_Res[-12,] #删除ELF3的结果
+write.table(diff_Res,file="2.gene_diff//diff_Res.xls",sep="\t",quote=F)
+dim(diff_Res)
+head(diff_Res)
+
+#输出热图所需要的文件
+heatmap <- rbind(ID=colnames(Tumor_exp[as.vector(rownames(diff_Res)),]),
+                 Tumor_exp[as.vector(rownames(diff_Res)),])
+
+length(names(heatmap[class=='Low']))  
+length(names(heatmap[class=='High']))
+heatmap2 <- cbind.data.frame(heatmap[class=='Low'],heatmap[class=='High'])
+dim(heatmap2)
+head(heatmap2)
+write.table(heatmap2,file="2.gene_diff//heatmap.txt",sep="\t",col.names=F,quote=F)
+
+##绘制热图
+rt=read.table("2.gene_diff//heatmap.txt",sep="\t",header=T,row.names=1,check.names=F)  
+# hmexp_1 <- scale( rt )
+hmexp_2 <- as.matrix(rt)
+library(gplots)
+A <- brewer.pal(11,"PiYG")
+morecol <- colorRampPalette(A)
+pdf("2.gene_diff//heatmap2.pdf")
+heatmap.2(hmexp_2,
+          dendrogram = "column",
+          scale = "row",
+          trace = "none",
+          col = rev(morecol(150)),
+          colsep = 4,
+          rowsep = 42,
+          labRow = NA,
+          density.info = "none",
+          key.xlab = "Z Score",
+          key.title = NA,
+          key.ylab = NA)
+dev.off()
+
+##绘制火山图
+x <- all_Res
+x$label<- rownames(x)
+head(x)
+x <- x[-1,]
+x$gsym <- row.names(x)
+plot_mode <- "advanced" 
+logFCcut <- 1 #log2-foldchange
+pvalCut <- 0.05 #P.value
+adjPcut <- 0.05 #adj.P.value
+
+#for advanced mode
+logFCcut2 <- 2
+logFCcut3 <- 3
+pvalCut2 <- 0.01
+pvalCut3 <- 0.001
+
+xmin <- (range(x$logFC)[1]- (range(x$logFC)[1]+ 10))
+xmax <- (range(x$logFC)[1]+ (10-range(x$logFC)[1]))
+ymin <- 0
+ymax <- -log10(x$adj.P.Val)[3] * 1.1
+
+mycol <- c("#7570B3","#666666","#D95F02","#223D6C","#D20A13","#088247","#58CDD9","#7A142C","#5D90BA","#431A3D","#91612D","#6E568C","#E0367A","#D8D155","#64495D","#7CC767")
+#火山图
+if (plot_mode == "classic"){
+  x$color_transparent <- ifelse((x$adj.P.Val < pvalCut & x$logFC > logFCcut), "red", 
+                                ifelse((x$adj.P.Val < pvalCut & x$logFC < -logFCcut), 
+                                       "skyblue","grey30"))
+  size <- ifelse((x$adj.P.Val < pvalCut & abs(x$logFC) > logFCcut), 4, 2)
+  
+} else if (plot_mode == "advanced") {
+  
+  n1 <- length(x[, 1])
+  cols <- rep("grey30", n1)
+  names(cols)<- rownames(x)
+  
+  cols[x$adj.P.Val < pvalCut & x$logFC >logFCcut]<- "#D95F02"
+  cols[x$adj.P.Val < pvalCut2 & x$logFC > logFCcut2]<- "#D95F02"
+  cols[x$adj.P.Val < pvalCut & x$logFC < -logFCcut]<- "#7570B3"
+  cols[x$adj.P.Val < pvalCut2 & x$logFC < -logFCcut2]<- "#7570B3"
+  color_transparent <- adjustcolor(cols, alpha.f = 0.5)
+  x$color_transparent <- color_transparent
+  
+  n1 <- length(x[, 1])
+  size <- rep(1, n1)
+  
+  size[x$adj.P.Val < pvalCut & x$logFC > logFCcut]<- 4
+  size[x$adj.P.Val < pvalCut2 & x$logFC > logFCcut2]<- 6
+  size[x$adj.P.Val < pvalCut3 & x$logFC > logFCcut3]<- 8
+  size[x$adj.P.Val < pvalCut & x$logFC < -logFCcut]<- 4
+  size[x$adj.P.Val < pvalCut2 & x$logFC < -logFCcut2]<- 6
+  size[x$adj.P.Val < pvalCut3 & x$logFC < -logFCcut3]<- 8
+  
+} else {
+  stop("Unsupport mode")
+}
+# Construct the plot object
+p1 <- ggplot(data=x, aes(logFC, -log10(adj.P.Val), label = label, color = pathway)) +
+  geom_point(alpha = 0.6, size = size, colour = x$color_transparent) +
+  
+  labs(x=bquote(~Log[2]~"(fold change)"), y=bquote(~-Log[10]~italic("adj.P.Value")), title="") + 
+  ylim(c(ymin,ymax)) +
+  scale_x_continuous(
+    breaks = c(-2, -logFCcut, 0, logFCcut, 2), #刻度线的位置
+    labels = c(-2, -logFCcut, 0, logFCcut, 2),
+    limits = c(-2, 2) #x轴范围，两侧对称才好看
+  ) + 
+  
+  #画阈值分界线
+  geom_vline(xintercept = c(-logFCcut, logFCcut), color="grey40", 
+             linetype="longdash", lwd = 0.5) + #虚线的形状和粗细
+  geom_hline(yintercept = -log10(pvalCut), color="#666666", 
+             linetype="longdash", lwd = 0.5) +
+  
+  theme_bw(base_size = 12
+  ) +
+  theme(panel.grid=element_blank())
+
+if (plot_mode == "advanced") {
+  p1 <- p1 + 
+    geom_vline(xintercept = c(-logFCcut, logFCcut), color="grey40", 
+               linetype="longdash", lwd = 0.5) +
+    geom_hline(yintercept = -log10(pvalCut), color="#666666", 
+               linetype="longdash", lwd = 0.5)
+}
+p1
+
+#显示logFC大于2的基因
+p2 <- p1 + geom_text_repel(aes(x = logFC, y = -log10(P.Value), 
+                               label = ifelse((logFC > 1 | logFC < -1), rownames(x),"")),
+                           colour="navy", size = 3, box.padding = unit(0.2, "lines"), 
+                           point.padding = unit(0.1, "lines"))
+p2
+if (plot_mode == "advanced") {ggsave("2.gene_diff//Volcano2.pdf",width=6,height=5)}
+####GO and KEGG####
+rm(list = ls())
+library(tidyverse)
+library(clusterProfiler)
+library(AnnotationDbi)
+library(GOplot)
+library(ggplot2)
+gsym.fc <- read_tsv("2.gene_diff//diff_Res.xls") %>%
+  dplyr::select(1:2)
+dim(gsym.fc)
+head(gsym.fc)
+gsym.id <- bitr(gsym.fc$Symbol, 
+                fromType = "SYMBOL", 
+                toType = "ENTREZID",
+                OrgDb = "org.Hs.eg.db") 
+head(gsym.id)
+#合并基因名、ENTREZID、foldchange
+gsym.dat <- gsym.fc %>%
+  dplyr::select(SYMBOL = Symbol,logFC = logFC) %>%
+  inner_join(gsym.id,"SYMBOL") %>%
+  na.omit()
+dim(gsym.dat)  
+head(gsym.dat)
+write_csv(gsym.dat, "3.GO_Kegg//anno.csv")
+input <- read.csv("3.GO_Kegg//anno.csv",sep=",",header=T,check.names=F)
+head(input)
+geneList <- input[,2]
+names(geneList) = as.character(input[,3])
+head(geneList)
+gene <- names(geneList)[abs(geneList) > 1]
+head(gene)
+##GO
+ego <- enrichGO(gene = gene,
+                OrgDb = org.Hs.eg.db,
+                ont = "All", 
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.1,
+                qvalueCutoff  = 0.5) 
+
+dim(ego)
+write.csv(ego,"3.GO_Kegg//enrichGO_output.csv",quote = F)
+p1 <- dotplot(ego, split="ONTOLOGY") + facet_grid(ONTOLOGY~., scale="free")
+p2 <- p1 + scale_fill_manual(c("#7570B3" ,"#D95F02")) + ggtitle("dotplot for GO")
+p2
+ggsave("3.GO_Kegg//GO_barplot.pdf", width = 12, height = 8)
+
+go <- data.frame(Category = ego$ONTOLOGY,
+                 ID = ego$ID,
+                 Term = ego$Description, 
+                 Genes = gsub("/", ", ", ego$geneID), 
+                 adj_pval = ego$p.adjust)
+
+genelist <- data.frame(ID = id.fc$ENTREZID, logFC = id.fc$logFC) 
+circ <- circle_dat(go, genelist)
+head(circ)
+GOBubble(circ, display = "multiple", colour = c("#7570B3" ,"#D95F02"),
+         ID = F, table.legend = F, labels = 15)+ggtitle("GOBubble for GO")
+ggsave("3.GO_Kegg//GO_Bubble.pdf", width = 12, height = 8)
+
+##KEGG
+kk <- enrichKEGG(id.fc$ENTREZID, 
+                 organism = "hsa", 
+                 keyType = "kegg",
+                 pvalueCutoff = 0.5,
+                 pAdjustMethod = "BH",
+                 qvalueCutoff =0.5)
+head(kk)
+
+write.csv(kk,"3.GO_Kegg//enrichKEGG_output.csv",quote = F)
+dotplot(kk)
+ggsave("3.GO_Kegg//KEGG_dotplot.pdf", width = 12, height = 8)
+#画图
+kkk <- read.csv("3.GO_Kegg//enrichKEGG_output.csv", header = T)
+kkk[1,]
+
+go <- data.frame(Category = "KEGG Pathway",
+                 ID = kkk$ID,
+                 Term = kkk$Description, 
+                 Genes = gsub("/", ", ", kkk$geneID), 
+                 adj_pval = kkk$p.adjust)
+genelist <- data.frame(ID = id.fc$ENTREZID, logFC = id.fc$logFC)   
+circ <- circle_dat(go, genelist)
+head(circ)
+
+#绘制KEGG圈图
+pdf(file="3.GO_Kegg//KEGGCircle.pdf",width = 12,height = 12)
+GOCircle(circ,rad1=2.5,rad2=3.5,label.size=4,nsub=8,lfc.col = c("#7570B3" ,"#D95F02"))           
+dev.off()
+####GSEA
+library(clusterProfiler)
+library(org.Hs.eg.db)
+input <- read.csv("3.GO_Kegg//annotation.csv",sep=",",header=T,check.names=F)
+head(input)
+geneList <- input[,2]
+names(geneList) = as.character(input[,1])
+head(geneList)
+geneList = sort(geneList, decreasing = TRUE)
+########## GO的GSEA富集分析：gseGO ##########
+gsego <- gseGO(geneList = geneList,
+               OrgDb = org.Hs.eg.db,
+               ont = "ALL",
+               nPerm = 10000,
+               minGSSize = 3,
+               maxGSSize = 500,
+               pvalueCutoff = 0.5,
+               verbose = FALSE)
+head(gsego)
+dim(gsego)
+# 保存GO的GSEA分析结果到文件
+write.table(gsego,file="7.GSEA//GSEA_GO_result.txt",sep="\t",
+            quote=F,row.names = F)
+
+########## KEGG的GSEA富集分析：gseKEGG ##########
+gsekk <- gseKEGG(geneList     = geneList,
+                 organism     = 'hsa',
+                 nPerm        = 10000,
+                 minGSSize    = 3,
+                 pvalueCutoff = 0.9999,
+                 verbose      = FALSE)
+head(gsekk)
+dim(gsekk)
+# 保存KEGG的GSEA分析结果到文件
+write.table(gsekk,file="7.GSEA//GSEA_KEGG_result.txt",sep="\t",
+            quote=F,row.names = F)
+library("enrichplot")
+pdf("7.GSEA//GSEA_GO.pdf",10,10)
+ridgeplot(gsego)+scale_fill_continuous(type = "gradient") + 
+  ggtitle("ridgeplot for GO_GSEA")
+dev.off()
+
+pdf("7.GSEA//GSEA_KEGG.pdf",10,10)
+gseaplot(gsekk, 1, color= "#7570B3",
+         color.line="#D95F02",
+         color.vline="#D95F02",
+         title=gsekk$Description[1])
+dev.off()
+
+####诊断性ROC曲线和预后型ROC曲线####
+rm(list = ls())
+load("1.geo_diff//normalize.Rdata")
+gene_exp <- outTab2["ELF3",]
+#gene_exp$id <- "MTHFD1"
+dim(gene_exp)
+group <- rep(c('1','2'),c(12,253)) #1为正常，2为肿瘤
+group <- as.data.frame(group) 
+gene_exp1 <- gene_exp %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(group = group$group) %>%
+  relocate("group")  %>%
+  rownames_to_column("id") %>%
+  write_tsv("5.ROC//gene_exp.txt")
+
+#诊断性ROC曲线
+library("pROC")
+df <- read.table("5.ROC//gene_exp.txt",head=T,sep="\t",check.names = F)
+head(df)
+auc.out <- c()
+
+#导出后AI修改横坐标和图例
+roc1 <- roc(df$group,df$ELF3,levels = c("2","1"))
+pdf("5.ROC//Diagnostic_ROC.pdf", 10, 10, onefile = FALSE)
+x <- plot.roc(df$group,df$ELF3,levels = c("2","1"),
+              smooth=T, #绘制平滑曲线
+              ci=TRUE, 
+              main="Diagnostic ROC",
+              col="#7570B3",
+              lwd=2, 
+              legacy.axes=T)
+
+legend("bottomright",
+       c(paste("Diagnostic_AUC=",round(x$auc,3))),
+       col="#7570B3",
+       lwd=6)
+dev.off()
+##预后ROC曲线
+# TCGA_CHOL <- read_tsv("5.ROC//TPM_CHOL_Expresssion.txt")
+# CHOL_clinical <- read_tsv("5.ROC//clinical.txt")
+# head(CHOL_clinical)
+# TCGA_CHOL <- TCGA_CHOL %>%
+#   column_to_rownames("gene_name")
+# TCGA_gene <- TCGA_CHOL[c("ELF3"),]
+# TCGA_gene <- as.data.frame(t(TCGA_gene))
+# TCGA_gene_data <- TCGA_gene %>%
+#   rownames_to_column("id")
+# TCGA_gene_data <- TCGA_gene_data[-c(1:9),]
+# TCGA_gene_data$id <- str_sub(TCGA_gene_data$id, 1, 12) 
+# TCGA_gene_data <- TCGA_gene_data %>%
+#   inner_join(CHOL_clinical,"id") %>%
+#   write_tsv("5.ROC//TCGA_ROC.txt") 
+# 
+# rt <- read_tsv("5.ROC//TCGA_ROC.txt") 
+# head(rt)
+# library(survivalROC)
+# data(mayo)
+# nobs <- NROW(mayo)
+# pdf("5.ROC//prognosis_ROC.pdf", 10, 10, onefile = FALSE)
+# #1-year
+# roc1 <- survivalROC(Stime=rt$survival_time, 
+#                     status=rt$status, 
+#                     marker = rt$ELF3, 
+#                     predict.time =365,
+#                     span = 0.25*nobs^(-0.20),
+#                     method="NNE")
+# roc1$AUC
+# plot(roc1$FP,roc1$TP,
+#      col="darkred",
+#      type="l",
+#      lwd=2,
+#      xlim=c(0,1), 
+#      ylim=c(0,1),
+#      main = "Prognostic ROC",
+#      xlab="Fasle Positive Rate",
+#      ylab="True Positive Rate")
+# 
+# #3-year
+# roc2 <- survivalROC(Stime=rt$survival_time, 
+#                     status=rt$status, 
+#                     marker = rt$ELF3, 
+#                     predict.time =1095,
+#                     span = 0.25*nobs^(-0.20),
+#                     method="NNE")
+# roc2$AUC
+# lines(roc2$FP,roc2$TP,
+#       col="midnightblue",
+#       type="l",
+#       lwd=2,
+#       xlim=c(0,1), 
+#       ylim=c(0,1))
+# #5-year
+# roc3 <- survivalROC(Stime=rt$survival_time, 
+#                     status=rt$status, 
+#                     marker = rt$ELF3, 
+#                     predict.time =1825,
+#                     span = 0.25*nobs^(-0.20),
+#                     method="NNE")
+# roc3$AUC
+# lines(roc3$FP,roc3$TP,
+#       col="orange",
+#       type="l",
+#       lwd=2,
+#       xlim=c(0,1), 
+#       ylim=c(0,1))
+# abline(0,1)
+# legend("bottomright",
+#        c(paste("1-year AUC=",round(roc1$AUC,4)),
+#          paste("3-year AUC=",round(roc2$AUC,4)),
+#          paste("5-year AUC=",round(roc3$AUC,4))),
+#        col=c("darkred", "midnightblue", "orange"),
+#        lwd=6)
+# 
+# dev.off()
+####ssGSEA####
+rm(list = ls())
+library(GSVA)
+library(TCGAbiolinks)
+library(ComplexHeatmap)
+library(dplyr)
+library(stringr)
+library(rtracklayer)
+library(SummarizedExperiment)
+library(clusterProfiler)
+library(pheatmap)
+library(RColorBrewer)
+library(maftools)
+library(circlize)
+library(matrixStats)
+library(GetoptLong)
+library(GenomicRanges)
+####免疫浸润####
+library(GSVA)
+library(limma)
+library(GSEABase)
+#读取输入文件，并对输入文件处理
+TCGA_CHOL <- read_tsv("6.Immune//TPM_CHOL_Expresssion.txt") %>%
+  column_to_rownames("gene_name")
+head(TCGA_CHOL)
+rt=as.matrix(TCGA_CHOL)
+mat=rt[rowMeans(rt)>0,]
+geneSet=getGmt("6.Immune//immune cell.gmt", 
+               geneIdType=SymbolIdentifier())
+#ssgsea分析
+ssgseaScore=gsva(mat, geneSet, method='ssgsea', kcdf='Gaussian', abs.ranking=TRUE)
+ssgseaScore2 <- as.data.frame(t(ssgseaScore))
+# ssgseaScore1=rbind(id=colnames(ssgseaScore),ssgseaScore)
+# write.table(ssgseaScore1,file="6.Immune//ssgseaOut.txt",sep="\t",quote=F,col.names=F)
+write.csv(ssgseaScore2, "6.Immune//ssGSEA_output.csv", quote = F, row.names = T)
+str(ssgseaScore)
+pdf("6.Immune//ssGSEA_heatmap.pdf")
+pheatmap(ssgseaScore, 
+         scale = "row", 
+         show_colnames = F, 
+         color = colorRampPalette(c("#7570B3", "white", "#D95F02"))(100))
+dev.off()
+##突变
+targetMut <- c("TP53", "KRAS", "BRAF", "EGFR","ELF3") #提取哪个基因的突变
+nonsilentmutation <- c("Frame_Shift_Del", "Frame_Shift_Ins", "Missense_Mutation", "Nonsense_Mutation", "Splice_Site", "In_Frame_Del", "In_Frame_Ins", "Translation_Start_Site", "Nonstop_Mutation") #Splice_Region是ncRNA-splicing
+
+# 4种找mutation的pipeline任选其一：muse, varscan2, somaticsniper, mutect2
+#此处提取COAD和READ的突变信息
+cholmut <- GDCquery_Maf(tumor = "CHOL", pipelines = "varscan2")
+# readmut <- GDCquery_Maf(tumor = "READ", pipelines = "varscan2")
+# all(colnames(coadmut) == colnames(readmut)) #两个文件的列名都是一样的，可以直接合并
+# crcmut <- rbind(coadmut, readmut) 
+crcmut <- data.frame(sample = str_sub(cholmut$Tumor_Sample_Barcode, 1, 12), cholmut)
+all_mutSample <- unique(crcmut$sample)
+
+# 去除Silent mutations
+table(crcmut$Variant_Classification)
+crcmut <- crcmut[crcmut$Variant_Classification %in% nonsilentmutation, ]
+
+# 提取target gene的突变
+crc_mut_gene <- crcmut[crcmut$Hugo_Symbol %in% targetMut,]
+
+TP53mutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "TP53", "sample"])  #带有目标突变的sample
+TP53wildSample <- setdiff(all_mutSample, TP53mutSample) #文件中的其他sample被认为是野生型，不在该文件中的sample被认为是未检出，后面将被标为NA
+
+KRASmutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "KRAS", "sample"])
+KRASwildSample <- setdiff(all_mutSample, KRASmutSample)
+
+BRAFmutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "BRAF", "sample"])
+BRAFwildSample <- setdiff(all_mutSample, BRAFmutSample)
+
+EGFRmutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "EGFR", "sample"])
+EGFRwildSample <- setdiff(all_mutSample, EGFRmutSample)
+
+ELF3mutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "ELF3", "sample"])
+ELF3wildSample <- setdiff(all_mutSample, EGFRmutSample)
+# ###下载MSI信息
+# msiquery1 <- GDCquery(project = "TCGA-CHOL", 
+#                       data.category = "Clinical",
+#                       legacy = TRUE,
+#                       access = "open",
+#                       data.type = "Clinical Supplement")
+# GDCdownload(msiquery1)
+# chol_msi_results <- GDCprepare_clinic(msiquery1, "msi")
+# 
+# read_msi_results <- GDCprepare_clinic(msiquery2, "msi")
+# msi_results <- rbind(read_msi_results, coad_msi_results) %>% .[, c(1, 3)]
+# colnames(msi_results) <- c("sample", "MSI")
+cholclinical <- GDCquery(project = "TCGA-CHOL", 
+                         data.category = "Clinical", 
+                         file.type = "xml")
+GDCdownload(cholclinical)
+cholclinical <- GDCprepare_clinic(cholclinical, clinical.info = "patient")
+
+clinical <- cholclinical
+#组合所需临床信息
+targetAnno <- clinical[, c("bcr_patient_barcode", 
+                           "race_list","gender","weight","vital_status","radiation_therapy",
+                           "stage_event_pathologic_stage","primary_pathology_ca_19_9_level")] 
+# targetAnno <- merge(targetAnno, msi_results, by.x = "bcr_patient_barcode", by.y = "sample",all.x = T)
+targetAnno$TP53mut <- NA
+targetAnno$KRASmut <- NA
+targetAnno$BRAFmut <- NA
+targetAnno$EGFRmut <- NA
+targetAnno$ELF3mut <- NA
+
+targetAnno[targetAnno$bcr_patient_barcode %in% TP53mutSample, "TP53mut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% TP53wildSample, "TP53mut"] <- "wildtype" 
+
+targetAnno[targetAnno$bcr_patient_barcode %in% KRASmutSample, "KRASmut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% KRASwildSample, "KRASmut"] <- "wildtype" 
+
+targetAnno[targetAnno$bcr_patient_barcode %in% BRAFmutSample, "BRAFmut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% BRAFwildSample, "BRAFmut"] <- "wildtype" 
+
+targetAnno[targetAnno$bcr_patient_barcode %in% EGFRmutSample, "EGFRmut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% EGFRwildSample, "EGFRmut"] <- "wildtype"
+
+targetAnno[targetAnno$bcr_patient_barcode %in% ELF3mutSample, "ELF3mut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% ELF3wildSample, "ELF3mut"] <- "wildtype"
+summary(targetAnno)
+#添加基因表达信息
+head(TCGA_CHOL)
+gene <- TCGA_CHOL["ELF3",]
+gene <- as.data.frame(t(gene))
+gene$bcr_patient_barcode <- str_sub(rownames(gene), 1, 12)
+gene <- gene[-c(1:9),]
+rownames(gene) <- gene$bcr_patient_barcode 
+targetAnno <- targetAnno %>%
+  inner_join(gene,"bcr_patient_barcode")
+####融合ssGSEA和临床数据
+tcga_gsva <- read.csv("6.Immune//ssGSEA_output.csv", row.names = 1)
+tcga_gsva <- data.frame(sample = str_sub(rownames(tcga_gsva), 1, 12), barcode = rownames(tcga_gsva), tcga_gsva) 
+tcga_gsva$sample <- str_replace_all(tcga_gsva$sample, "\\.", "-")
+
+library(data.table)
+heatmapinput <- unique(merge(tcga_gsva, targetAnno, by.x = "sample", by.y = "bcr_patient_barcode", all.x = T))
+library(data.table)
+rownames(heatmapinput) <- heatmapinput$barcode
+summary(heatmapinput)
+
+write.csv(heatmapinput, "6.Immune//heatmapinput.csv")
+#画图
+library(circlize)
+library(ComplexHeatmap)
+heatmapinput <- read.csv("6.Immune//heatmapinput.csv", row.names = 1)
+ml <- heatmapinput[, c(3:26)] #画图的ssGSEA数据
+ml <- as.data.frame(t(apply(ml, 2, scale))) #scale标化
+colnames(ml) <- rownames(heatmapinput)
+
+col_fun <- colorRamp2(c(-5, 0, 5), c("#377EB8", "white", "#E41A1C"))
+# col_fun <- colorRamp2(c(-5, 0, 5), c("#7570B3", "#666666", "#D95F02"))
+#获取聚类分组信息
+h1 <- Heatmap(as.matrix(ml), 
+              cluster_rows = TRUE, 
+              cluster_columns = TRUE, 
+              clustering_method_columns = "ward.D2",
+              show_row_names = TRUE, 
+              show_column_names = FALSE,
+              clustering_distance_columns = "euclidean", 
+              clustering_distance_rows = "euclidean",
+              clustering_method_rows  = "ward.D2")
+tree <- column_dend(h1)
+ind <- cutree(as.hclust(tree), k = 2)[order.dendrogram(tree)] #此处划分为2类，根据你自己的数据调整
+table(ind)
+heatmapinput$Immune_infiltration <- ind[heatmapinput$barcode]
+draw(h1)
+write.csv(as.data.frame(t(ind)),"6.Immune//Cluster.csv")
+####增加注释
+heatmapinput$Immune_infiltration <- str_replace(heatmapinput$Immune_infiltration, "2", "Low infiltration")
+heatmapinput$Immune_infiltration <- str_replace(heatmapinput$Immune_infiltration, "1", "High infiltration")
+
+#临床信息注释
+Immune_infiltration <- heatmapinput[, "Immune_infiltration"]
+TP53_mutation <- heatmapinput[, "TP53mut"]
+KRAS_mutation <- heatmapinput[, "KRASmut"]
+BRAF_mutation <- heatmapinput[, "BRAFmut"]
+EGFR_mutation <- heatmapinput[, "EGFRmut"]
+ELF3_mutation <- heatmapinput[, "ELF3mut"]
+Race <- heatmapinput[, "race_list"]
+Gender <- heatmapinput[, "gender"]
+Weight <- heatmapinput[, "weight"]
+Survival <- heatmapinput[, "vital_status"]
+ELF3_mRNA <- heatmapinput[, "ELF3"]
+Stage <- heatmapinput[, "stage_event_pathologic_stage"]
+ha = HeatmapAnnotation(Immune_infiltration =Immune_infiltration,
+                       ELF3_mRNA = ELF3_mRNA,
+                       ELF3_mutation = ELF3_mutation, 
+                       TP53_mutation = TP53_mutation, 
+                       KRAS_mutation = KRAS_mutation, 
+                       BRAF_mutation = BRAF_mutation, 
+                       EGFR_mutation = EGFR_mutation,
+                       Gender = Gender, 
+                       Race = Race, 
+                       Weight = Weight, 
+                       Survival = Survival, 
+                       
+                       # radiation_therapy = radiation_therapy,
+                       # CA199_Level = CA199_Level,
+                       Stage = Stage,
+                       # col = list(Immune_infiltration = c("High infiltration" = "#3FA538", "Low infiltration" = "#9FD29BFF"),
+                       #            Tumor_site = c("left" = "#E00115", "right" = "#5E84B6"),
+                       #            TP53_mutation = c("mutant" = "black", "wildtype" = "grey"),KRAS_mutation = c("mutant" = "black", "wildtype" = "grey"),BRAF_mutation = c("mutant" = "black", "wildtype" = "grey"),EGFR_mutation = c("mutant" = "black", "wildtype" = "grey"),
+                       #            Gender = c("MALE" = "#C4868E", "FEMALE" = "#97A8C7"),
+                       #            MSI = c("MSI-H" = "#E5554D", "MSI-L" = "#C4868E", "MSS" = "#AEB6CE", "Indeterminate" = "#2B3D44"),Polyps = c("YES" = "black", "NO" = "grey"),Survival = c("Alive" = "#3FA538", "Dead" = "#E00115"),
+                       #            Stage =  c("Stage I" = "#B0B0FFFF", "Stage IA" = "#6060FFFF", "Stage II" = "#B0FFB0FF" , 
+                       #                       "Stage IIA" ="#95FF95FF", "Stage IIB" = "#7AFF7AFF", "Stage IIC" = "#60FF60FF",
+                       #                       "Stage III" = "#F7E897FF", "Stage IIIA" = "#F9EF64FF", "Stage IIIB" = "#FCF732FF", "Stage IIIC" = "#FFFF00FF",
+                       #                       "Stage IV" = "#FF6060FF", "Stage IVA"="#FF3030FF" , "Stage IVB" = "#FF0000FF")),na_col = "white",#各个临床信息的颜色，Anatomic_location颜色输入也同其他，更好颜色搭配信息请参考FigureYa28color
+                       show_legend = rep(TRUE, 12),#是否要显示annotation legend
+                       annotation_height = unit(rep(5, 12), "mm"),#临床annotation的高度
+                       annotation_legend_param = list(
+                         Immune_infiltration = list(title = "Immune infiltration"),
+                         ELF3_mRNA = list(title = "ELF3_mRNA"),
+                         ELF3_mutation = list(title = "ELF3_mutation"),
+                         TP53_mutation = list(title = "TP53 mutation"),
+                         KRAS_mutation = list(title = "KRAS mutation"),
+                         BRAF_mutation = list(title = "BRAF mutation"),
+                         EGFR_mutation = list(title = "EGFR mutation"),
+                         Gender = list(title = "Gender"),
+                         Race = list(title = "Race"),
+                         Weight = list(title = "Weight"),
+                         Survival = list(title = "Survival"),
+                         # radiation_therapy = list(title = "Radiation Therapy"),
+                         # CA199_Level = list(title = "CA199_Level"),
+                         Stage = list(title = "Stage"))#annotation legend的标签
+)
+
+ht <- Heatmap(as.matrix(ml), col = col_fun, 
+              name = "TCGA_CHOL ssGSEA",
+              cluster_rows = TRUE, cluster_columns = TRUE,          
+              show_row_names = TRUE, show_column_names = FALSE,
+              bottom_annotation = ha, column_title = qq("TCGA CHOL samples (n = @{ncol(ml)})"),
+              clustering_method_columns = "ward.D2",
+              clustering_distance_columns = "euclidean", 
+              clustering_distance_rows = "euclidean",
+              clustering_method_rows  = "ward.D2", column_dend_height = unit(30, "mm")
+)
+pdf("6.Immune//ssGSEA.pdf", 16, 12)
+draw(ht, annotation_legend_side = "left", heatmap_legend_side = "left")
+
+#装饰heatmap
+annotation_titles <- c(Immune_infiltration = "Immune infiltration",
+                       ELF3_mutation = "ELF3_mutation",
+                       ELF3_mRNA = "ELF3_mRNA Expression",
+                       TP53_mutation = "TP53 mutation",
+                       KRAS_mutation = "KRAS mutation",
+                       BRAF_mutation = "BRAF mutation",
+                       EGFR_mutation = "EGFR mutation",
+                       Gender = "Gender",
+                       Race = "Race",
+                       Weight = "Weight",
+                       Survival = "Survival",
+                       Stage = "Stage")
+for(an in names(annotation_titles)) {
+  decorate_annotation(an, {
+    grid.text(annotation_titles[an], unit(-2, "mm"), just = "right")#对齐方向是右边
+    grid.rect(gp = gpar(fill = NA, col = "black"))
+  })
+}
+
+# #分组划线：具体数值要参考聚类的信息
+# decorate_heatmap_body("TCGA_CHOL ssGSEA", {
+#   grid.lines(c(0, 0), c(0, 1), gp = gpar(lty = 1, lwd = 2))
+#   grid.lines(c(table(ind)[[1]]/sum(table(ind)), table(ind)[[1]]/sum(table(ind))), 
+#              gp = gpar(lty = 2, lwd = 2))
+#   grid.lines(c(1, 1), c(0, 1), gp = gpar(lty = 1, lwd = 2))
+# }, slice = NULL)
+# 
+# #在heatmap上注释文字信息
+# decorate_heatmap_body("CRC ssGSEA", {
+#   grid.text("Low infiltration", (table(ind)[[1]]/2)/sum(table(ind)), 0.1, #文字所放位置的x和y，根据自己的数据调整
+#             default.units = "npc", gp = gpar(fontsize = 16))
+#   grid.text("High infiltration", (table(ind)[[1]] + table(ind)[[2]]/2)/sum(table(ind)), 0.1, default.units = "npc", gp = gpar(fontsize = 16))
+# }, slice = NULL)
+
+dev.off()
+####Immune_GEO####
+####免疫浸润####
+library(GSVA)
+library(limma)
+library(GSEABase)
+#读取输入文件，并对输入文件处理
+load("1.geo_diff//tumor.Rdata")
+head(tumor)
+rt=as.matrix(tumor)
+# rownames(rt)=tumor[,1]
+# exp=rt[,2:ncol(rt)]
+# dimnames=list(rownames(exp),colnames(exp))
+# mat=matrix(as.numeric(as.matrix(exp)),nrow=nrow(exp),dimnames=dimnames)
+head
+head(rt)
+mat=avereps(rt)
+mat=mat[rowMeans(mat)>0,]
+geneSet=getGmt("8.Immune_GEO//immune cell.gmt", 
+               geneIdType=SymbolIdentifier())
+#ssgsea分析
+ssgseaScore=gsva(mat, geneSet, method='ssgsea', kcdf='Gaussian', abs.ranking=TRUE)
+ssgseaScore=rbind(id=colnames(ssgseaScore),ssgseaScore)
+write.table(ssgseaScore,file="8.Immune_GEO//ssgseaOut.txt",sep="\t",quote=F,col.names=F)
+
+
+#获取聚类分组信息
+library(sparcl)                                                                 #引用包
+data=read.table("8.Immune_GEO//ssgseaOut.txt",sep="\t",header=T,check.names=F,row.names=1)    #读取输入文件
+#hierarchical cluster
+hc = hclust(dist(t(data)))
+y=cutree(hc,2)               #将聚类结果分成3组
+#输出聚类表格
+write.table(y,file="8.Immune_GEO//cluster.txt",sep="\t",quote=F,col.names=F)
+#输出聚类图片
+pdf(file="8.Immune_GEO//hclust.pdf",width=50,height=20)
+ColorDendrogram(hc, y = y, labels = names(y), branchlength = 0.3,xlab=" ",sub=" ",main = " ")
+dev.off()
+library(pheatmap)
+rt=read.table("8.Immune_GEO//ssgseaOut.txt",sep="\t",header=T,row.names=1,check.names=F)    #读取文件
+Type=read.table("8.Immune_GEO//cluster.txt",sep="\t",check.names=F,header=F)
+Type[,2]=paste0("Cluster",Type[,2])
+Type=Type[order(Type[,2]),]
+rt=rt[,as.vector(Type[,1])]
+
+cluster=as.data.frame(Type[,2])
+row.names(cluster)=Type[,1]
+colnames(cluster)="Cluster"
+library(tidyverse)
+cluster <- cluster %>%
+  rownames_to_column("id")
+gene_exp <- tumor["ELF3",]
+ELF3 <- as.data.frame(t(gene_exp))
+anno <- ELF3 %>%
+  rownames_to_column("id") %>%
+  inner_join(cluster, "id") 
+rownames(anno) <- anno[,"id"]
+anno <- subset(anno, select = -c(id))
+col_fun <- colorRamp2(c(-5, 0, 5), c("#377EB8", "white", "#E41A1C"))
+pdf("8.Immune_GEO//heatmap.pdf",height=5,width=9)
+pheatmap(rt, 
+         annotation=anno,
+         color = colorRampPalette(c("blue", "white", "red"))(50),
+         cluster_cols =F,
+         fontsize=8,
+         fontsize_row=8,
+         scale="row",
+         show_colnames=F,
+         fontsize_col=3)
+dev.off()
+
+
+
+#定义每个cluster分组信息，需要修改
+Cluster1="Immunity_L"
+Cluster2="Immunity_H"
+
+
+#输出分组结果
+a=c()
+a[Type[,2]=="Cluster1"]=Cluster1
+a[Type[,2]=="Cluster2"]=Cluster2
+clusterOut=cbind(Type,a)
+write.table(clusterOut,file="8.Immune_GEO//cluster.Immunity.txt",sep="\t",quote=F,col.names=F,row.names=F)
+head(clusterOut)
+box_data <- anno %>%
+  rownames_to_column("V1") %>%
+  inner_join(clusterOut,"V1")
+head(box_data)
+library(ggplot2)
+library(ggpubr)
+library(ggsci)
+pdf("8.Immune_GEO//Immune_box.pdf")
+ggplot(aes(a,ELF3,color = a),data = box_data) +
+  geom_dotplot(binaxis = "y",
+               stackdir =  "centerwhole",
+               stackratio = 1,
+               method	= "dotdensity",
+               dotsize = .8) +
+  #  stat_compare_means(method = "wilcox.test",label.x = 1.4,label.y = 10.5)+
+  theme_bw() +
+  stat_boxplot(geom = "errorbar", width = .2) +
+  geom_boxplot(alpha = 0, width = .6) +
+  scale_color_jama()
+dev.off()
+load("1.geo_diff//all_normalize.Rdata")
+gene_exp <- outTab2["ELF3",]
+dim(gene_exp)
+ELF3_Nor <- as.data.frame(t(gene_exp))
+Normal <- rownames(ELF3_Nor)[1:12]
+ELF3_Nor_1 <- ELF3_Nor %>%
+  mutate(group = if_else(rownames(.) %in% Normal,"Normal","Tumor"))
+head(ELF3_Nor_1)  
+pdf("8.Immune_GEO//Normal_Tumor_box.pdf")
+ggplot(aes(group,ELF3,color = group),data = ELF3_Nor_1) +
+  geom_dotplot(binaxis = "y",
+               stackdir =  "centerwhole",
+               stackratio = 1,
+               method	= "dotdensity",
+               dotsize = .8) +
+  #  stat_compare_means(method = "wilcox.test",label.x = 1.4,label.y = 10.5)+
+  theme_bw() +
+  stat_boxplot(geom = "errorbar", width = .2) +
+  geom_boxplot(alpha = 0, width = .6) +
+  scale_color_jama()
+dev.off()
+####mutation####
+library(TCGAbiolinks)
+library(maftools)
+library(dplyr)
+library(DT)
+#查看癌症项目名缩写
+cancerName<-data.frame(id = getGDCprojects()$project_id, 
+                       name = getGDCprojects()$name)
+cancerName
+clinical <- GDCquery(project = "TCGA-CHOL", 
+                     data.category = "Clinical", 
+                     file.type = "xml")
+GDCdownload(clinical)
+cliquery <- GDCprepare_clinic(clinical, clinical.info = "patient")
+colnames(cliquery)[1] <- "Tumor_Sample_Barcode"
+# str(cliquery)
+mut <- GDCquery_Maf(tumor = "CHOL", pipelines = "mutect2")
+
+maf <- read.maf(maf = mut, clinicalData = cliquery, isTCGA = T)
+geneCloud(input = maf, minMut = 1)
+maf.sig = oncodrive(maf = maf, minMut = 1, pvalMethod = 'zscore')
+head(maf.sig)
+pdf("11.mutation//Oncodrive.pdf")
+plotOncodrive(res = maf.sig, fdrCutOff = 0.1, useFraction = TRUE)
+dev.off()
+plotVaf(maf=maf)
+pdf("11.mutation//lollipopPlot.pdf")
+lollipopPlot(maf=maf, gene="ELF3", showMutationRate=TRUE)
+dev.off()
+pdf("11.mutation//oncoplot.pdf")
+oncoplot(maf = maf,
+         top = 80,
+         fontSize = 0.4,legendFontSize = 1.5,annotationFontSize = 1)
+dev.off()
